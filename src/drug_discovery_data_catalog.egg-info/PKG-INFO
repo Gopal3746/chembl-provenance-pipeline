@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: drug-discovery-data-catalog
+Version: 0.1.0
+Summary: A reproducible drug discovery data pipeline with metadata cataloging and provenance tracking.
+Requires-Python: >=3.12
+Requires-Dist: httpx>=0.28
+Requires-Dist: pydantic>=2.10
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3; extra == "dev"
+Requires-Dist: ruff>=0.11; extra == "dev"

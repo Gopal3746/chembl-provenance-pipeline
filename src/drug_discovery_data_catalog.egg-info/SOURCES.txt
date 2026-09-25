@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+src/drug_catalog/__init__.py
+src/drug_discovery_data_catalog.egg-info/PKG-INFO
+src/drug_discovery_data_catalog.egg-info/SOURCES.txt
+src/drug_discovery_data_catalog.egg-info/dependency_links.txt
+src/drug_discovery_data_catalog.egg-info/requires.txt
+src/drug_discovery_data_catalog.egg-info/top_level.txt
+tests/test_package.py
