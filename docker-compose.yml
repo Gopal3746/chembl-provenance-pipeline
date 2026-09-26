@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: drug-catalog-postgres
+    environment:
+      POSTGRES_DB: drug_catalog
+      POSTGRES_USER: drug_catalog
+      POSTGRES_PASSWORD: drug_catalog
+    ports:
+      - "5432:5432"
+    volumes:
+      - drug_catalog_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U drug_catalog -d drug_catalog",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  drug_catalog_postgres_data:
