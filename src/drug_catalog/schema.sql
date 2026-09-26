@@ -129,3 +129,10 @@ CREATE INDEX IF NOT EXISTS idx_activities_assay
 
 CREATE INDEX IF NOT EXISTS idx_activities_type
     ON activities(activity_type);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sources_identity
+    ON sources (
+        source_name,
+        COALESCE(source_version, ''),
+        endpoint
+    );

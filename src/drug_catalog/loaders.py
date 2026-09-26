@@ -15,6 +15,26 @@ def load_source(
     with connection.cursor() as cursor:
         cursor.execute(
             """
+            SELECT source_id
+            FROM sources
+            WHERE source_name = %s
+              AND source_version IS NOT DISTINCT FROM %s
+              AND endpoint = %s
+            """,
+            (
+                run.source.source_name,
+                run.source.source_version,
+                run.source.endpoint,
+            ),
+        )
+
+        row = cursor.fetchone()
+
+        if row is not None:
+            return row[0]
+
+        cursor.execute(
+            """
             INSERT INTO sources (
                 source_name,
                 source_version,
@@ -33,7 +53,7 @@ def load_source(
         row = cursor.fetchone()
 
     if row is None:
-        raise RuntimeError("Failed to insert source")
+        raise RuntimeError("Failed to load source")
 
     return row[0]
 
@@ -175,6 +195,7 @@ def load_activities(
     activities: list[NormalizedActivity],
     *,
     compound_ids: dict[str, int],
+    assay_ids: dict[str, int],
     target_id: int,
     ingestion_run_id: str,
 ) -> int:
@@ -192,12 +213,20 @@ def load_activities(
             if compound_id is None:
                 continue
 
+            assay_id = None
+
+            if activity.assay_chembl_id is not None:
+                assay_id = assay_ids.get(
+                    activity.assay_chembl_id
+                )
+
             cursor.execute(
                 """
                 INSERT INTO activities (
                     activity_id,
                     compound_id,
                     target_id,
+                    assay_id,
                     document_chembl_id,
                     activity_type,
                     activity_value,
@@ -208,15 +237,27 @@ def load_activities(
                 )
                 VALUES (
                     %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s
                 )
-                ON CONFLICT (activity_id) DO NOTHING
+                ON CONFLICT (activity_id)
+                DO UPDATE SET
+                    compound_id = EXCLUDED.compound_id,
+                    target_id = EXCLUDED.target_id,
+                    assay_id = EXCLUDED.assay_id,
+                    document_chembl_id = EXCLUDED.document_chembl_id,
+                    activity_type = EXCLUDED.activity_type,
+                    activity_value = EXCLUDED.activity_value,
+                    activity_units = EXCLUDED.activity_units,
+                    relation = EXCLUDED.relation,
+                    pchembl_value = EXCLUDED.pchembl_value,
+                    ingestion_run_id = EXCLUDED.ingestion_run_id
                 RETURNING activity_id
                 """,
                 (
                     activity.activity_id,
                     compound_id,
                     target_id,
+                    assay_id,
                     activity.document_chembl_id,
                     activity.activity_type,
                     activity.activity_value,
@@ -231,3 +272,50 @@ def load_activities(
                 inserted += 1
 
     return inserted
+
+def load_assays(
+    connection: Connection,
+    activities: list[NormalizedActivity],
+    *,
+    target_id: int,
+) -> dict[str, int]:
+    assay_ids: dict[str, int] = {}
+
+    unique_assays = sorted(
+        {
+            activity.assay_chembl_id
+            for activity in activities
+            if activity.assay_chembl_id is not None
+        }
+    )
+
+    with connection.cursor() as cursor:
+        for assay_chembl_id in unique_assays:
+            cursor.execute(
+                """
+                INSERT INTO assays (
+                    assay_chembl_id,
+                    target_id
+                )
+                VALUES (%s, %s)
+                ON CONFLICT (assay_chembl_id)
+                DO UPDATE SET
+                    target_id = EXCLUDED.target_id
+                RETURNING assay_id
+                """,
+                (
+                    assay_chembl_id,
+                    target_id,
+                ),
+            )
+
+            row = cursor.fetchone()
+
+            if row is None:
+                raise RuntimeError(
+                    f"Failed to load assay {assay_chembl_id}"
+                )
+
+            assay_ids[assay_chembl_id] = row[0]
+
+    return assay_ids

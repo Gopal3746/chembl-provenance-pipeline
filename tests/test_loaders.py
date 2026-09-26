@@ -1,5 +1,6 @@
 from drug_catalog.loaders import (
     load_activities,
+    load_assays,
     load_compounds,
     load_ingestion_run,
     load_source,
@@ -12,4 +13,5 @@ def test_loader_functions_are_available() -> None:
     assert callable(load_ingestion_run)
     assert callable(load_compounds)
     assert callable(load_target)
+    assert callable(load_assays)
     assert callable(load_activities)
