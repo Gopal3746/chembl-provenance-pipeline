@@ -18,6 +18,18 @@ class ChEMBLClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
+    def fetch_molecule(
+        self,
+        molecule_chembl_id: str,
+    ) -> dict[str, Any]:
+        url = f"{self.base_url}/molecule/{molecule_chembl_id}.json"
+
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.get(url)
+            response.raise_for_status()
+
+            return response.json()
+
     def fetch_activities(
         self,
         target_chembl_id: str,

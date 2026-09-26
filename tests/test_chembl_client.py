@@ -138,3 +138,32 @@ def test_fetch_activities_single_page(monkeypatch) -> None:
             )
 
             assert len(activities) == 2
+
+def test_fetch_molecule(monkeypatch) -> None:
+    payload = {
+        "molecule_chembl_id": "CHEMBL68920",
+        "molecule_structures": {
+            "standard_inchi_key": "TEST-INCHI-KEY",
+        },
+    }
+
+    def mock_get(self, url, params=None):
+        request = httpx.Request("GET", url)
+
+        return httpx.Response(
+            status_code=200,
+            json=payload,
+            request=request,
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", mock_get)
+
+    client = ChEMBLClient()
+
+    result = client.fetch_molecule("CHEMBL68920")
+
+    assert result["molecule_chembl_id"] == "CHEMBL68920"
+    assert (
+        result["molecule_structures"]["standard_inchi_key"]
+        == "TEST-INCHI-KEY"
+    )

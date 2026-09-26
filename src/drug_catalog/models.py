@@ -24,3 +24,18 @@ class IngestionRun(BaseModel):
     source: SourceMetadata
     raw_file: RawFileMetadata
     pipeline_version: str
+
+class CompoundRecord(BaseModel):
+    molecule_chembl_id: str
+    pubchem_cid: int | None = None
+
+    molecular_formula: str | None = None
+    molecular_weight: float | None = None
+
+    smiles: str | None = None
+    connectivity_smiles: str | None = None
+
+    inchi: str | None = None
+    inchikey: str
+
+    iupac_name: str | None = None
