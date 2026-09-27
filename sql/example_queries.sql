@@ -1,4 +1,16 @@
--- Most potent EGFR measurements
+-- ============================================================
+-- Drug Discovery Data Catalog
+-- Example analytical queries
+-- ============================================================
+
+
+-- 1. Most potent EGFR IC50 measurements.
+--
+-- Activity values should only be ranked when the measurement
+-- type and units are comparable. This query therefore restricts
+-- the result to IC50 measurements reported in nM rather than
+-- sorting IC50, Ki, Kd, and EC50 values together.
+
 SELECT
     c.molecule_chembl_id,
     c.pubchem_cid,
@@ -6,74 +18,97 @@ SELECT
     a.activity_type,
     a.activity_value,
     a.activity_units,
-    s.assay_chembl_id
-FROM activities a
-JOIN compounds c
+    ass.assay_chembl_id
+FROM activities AS a
+JOIN compounds AS c
     ON c.compound_id = a.compound_id
-JOIN targets t
+JOIN targets AS t
     ON t.target_id = a.target_id
-LEFT JOIN assays s
-    ON s.assay_id = a.assay_id
+LEFT JOIN assays AS ass
+    ON ass.assay_id = a.assay_id
 WHERE t.target_chembl_id = 'CHEMBL203'
+  AND a.activity_type = 'IC50'
+  AND a.activity_units = 'nM'
 ORDER BY a.activity_value ASC
-LIMIT 10;
+LIMIT 20;
 
 
--- Activity counts by measurement type
+-- 2. Activity measurements by type.
+
 SELECT
     activity_type,
-    COUNT(*) AS activity_count
+    activity_units,
+    COUNT(*) AS measurement_count
 FROM activities
-GROUP BY activity_type
-ORDER BY activity_count DESC;
+GROUP BY
+    activity_type,
+    activity_units
+ORDER BY
+    measurement_count DESC;
 
 
--- Compounds with multiple activity measurements
+-- 3. Compounds with measurements from multiple assays.
+--
+-- Multiple measurements for the same compound are not
+-- automatically conflicts. Measurements produced by different
+-- assays represent different experimental contexts.
+
 SELECT
     c.molecule_chembl_id,
     COUNT(*) AS measurement_count,
-    MIN(a.activity_value) AS minimum_value,
-    MAX(a.activity_value) AS maximum_value
-FROM activities a
-JOIN compounds c
+    COUNT(DISTINCT ass.assay_chembl_id) AS assay_count
+FROM activities AS a
+JOIN compounds AS c
     ON c.compound_id = a.compound_id
-GROUP BY c.molecule_chembl_id
+LEFT JOIN assays AS ass
+    ON ass.assay_id = a.assay_id
+GROUP BY
+    c.molecule_chembl_id
 HAVING COUNT(*) > 1
-ORDER BY measurement_count DESC;
+ORDER BY
+    measurement_count DESC
+LIMIT 20;
 
 
--- Provenance of source ingestion runs
+-- 4. Source and ingestion provenance.
+
 SELECT
-    ir.run_id,
     s.source_name,
-    ir.record_count,
-    ir.pipeline_version,
-    ir.retrieved_at,
-    ir.raw_file_sha256
-FROM ingestion_runs ir
-JOIN sources s
-    ON s.source_id = ir.source_id
-ORDER BY ir.retrieved_at;
+    s.source_version,
+    s.endpoint,
+    r.run_id,
+    r.retrieved_at,
+    r.raw_file_path,
+    r.raw_file_sha256,
+    r.raw_record_count
+FROM ingestion_runs AS r
+JOIN sources AS s
+    ON s.source_id = r.source_id
+ORDER BY
+    r.retrieved_at DESC;
 
 
--- Activities with source lineage
+-- 5. Trace activity records back to the source ingestion run.
+
 SELECT
-    a.activity_id,
     c.molecule_chembl_id,
     t.target_chembl_id,
+    ass.assay_chembl_id,
     a.activity_type,
     a.activity_value,
     a.activity_units,
-    ir.run_id,
-    src.source_name,
-    ir.raw_file_sha256
-FROM activities a
-JOIN compounds c
+    s.source_name,
+    s.source_version,
+    r.run_id
+FROM activities AS a
+JOIN compounds AS c
     ON c.compound_id = a.compound_id
-JOIN targets t
+JOIN targets AS t
     ON t.target_id = a.target_id
-LEFT JOIN ingestion_runs ir
-    ON ir.run_id = a.ingestion_run_id
-LEFT JOIN sources src
-    ON src.source_id = ir.source_id
-ORDER BY a.activity_id;
+LEFT JOIN assays AS ass
+    ON ass.assay_id = a.assay_id
+JOIN ingestion_runs AS r
+    ON r.run_id = a.ingestion_run_id
+JOIN sources AS s
+    ON s.source_id = r.source_id
+LIMIT 50;

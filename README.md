@@ -2,11 +2,11 @@
 
 A reproducible scientific data engineering pipeline for ingesting, standardizing, enriching, validating, and cataloging compound-target bioactivity data with end-to-end provenance.
 
-The project integrates public drug discovery data from ChEMBL and PubChem, preserves raw source records, performs quality checks, and loads curated scientific data into PostgreSQL for discovery and analysis.
+The project integrates public drug discovery data from ChEMBL and PubChem, preserves raw source records, performs quality checks, supports resumable enrichment, and loads curated scientific data into PostgreSQL for discovery and analysis.
 
 ## Why This Project Exists
 
-Drug discovery datasets often come from heterogeneous scientific sources with different identifiers, schemas, completeness levels, and metadata conventions.
+Drug discovery datasets often come from heterogeneous scientific sources with different identifiers, schemas, completeness levels, experimental contexts, and metadata conventions.
 
 This project demonstrates a workflow for:
 
@@ -14,8 +14,10 @@ This project demonstrates a workflow for:
 - preserving raw source data
 - standardizing bioactivity records
 - enriching compounds across databases
-- tracking data provenance and checksums
-- identifying invalid or conflicting measurements
+- tracking source releases, provenance, and checksums
+- identifying invalid, repeated, and conflicting measurements
+- processing large target-specific datasets in batches
+- checkpointing external API enrichment
 - cataloging curated records in PostgreSQL
 - supporting reproducible SQL-based data discovery
 
@@ -29,8 +31,15 @@ ChEMBL is used for:
 - molecule identifiers
 - assay identifiers
 - document identifiers
-- activity types such as IC50 and Ki
+- activity types such as IC50, Ki, Kd, and EC50
 - standardized activity values
+- source release/version metadata
+
+The full EGFR pipeline run used:
+
+```text
+ChEMBL_37
+```
 
 ### PubChem
 
@@ -45,11 +54,11 @@ PubChem is used to enrich ChEMBL compounds with:
 - InChIKey
 - IUPAC name
 
-Compounds are linked across the two sources using InChIKey.
+Compounds are linked across ChEMBL and PubChem using InChIKey.
 
 ## Example Target
 
-The current example pipeline uses:
+The current pipeline example uses:
 
 ```text
 CHEMBL203 — EGFR
@@ -94,10 +103,12 @@ The end-to-end CLI performs the following workflow:
 ChEMBL API
     |
     v
-raw activity JSON
+paginated activity ingestion
     |
+    +--> raw JSON
     +--> SHA-256 checksum
     +--> provenance manifest
+    +--> ChEMBL release version
     |
     v
 activity normalization
@@ -109,16 +120,17 @@ activity normalization
 unique compounds
     |
     v
-ChEMBL molecule lookup
+batched ChEMBL molecule lookup
     |
     v
 InChIKey
     |
     v
-PubChem enrichment
+batched PubChem enrichment
     |
-    +--> enriched compound JSON
-    +--> provenance manifest
+    +--> retry / exponential backoff
+    +--> persistent enrichment cache
+    +--> checkpoint after successful batches
     |
     v
 duplicate/conflict analysis
@@ -130,28 +142,70 @@ consolidated quality report
 PostgreSQL catalog
 ```
 
-## Current Sample Results
+## Full EGFR Pipeline Results
 
-For a 25-record ChEMBL sample targeting EGFR:
+The pipeline was validated end-to-end against the complete ChEMBL activity dataset returned for EGFR (`CHEMBL203`) using ChEMBL 37.
+
+| Metric | Result |
+| --- | ---: |
+| Raw ChEMBL activity records | 58,847 |
+| Normalized activity records | 28,643 |
+| Rejected activity records | 30,204 |
+| Unique compounds | 14,670 |
+| PubChem-enriched compounds | 14,383 |
+| Enrichment failures | 287 |
+| Assays cataloged | 2,690 |
+| Activity rows loaded | 28,148 |
+
+The full-scale run processed PubChem enrichment in hundreds of batches rather than issuing one API request per compound.
+
+Persistent checkpointing allows completed PubChem lookups to be reused if a later request fails or the pipeline is interrupted.
+
+Raw ChEMBL data can also be reused locally so downstream processing does not require downloading the complete activity dataset again.
+
+## Resilient Enrichment
+
+Large scientific API workflows can fail because of transient network errors, rate limits, or upstream service availability.
+
+The PubChem enrichment layer therefore includes:
+
+- batched compound requests
+- configurable request timeouts
+- retry handling
+- exponential backoff
+- handling for transient HTTP `429` and `5xx` responses
+- persistent local checkpoints
+- reuse of successfully enriched compounds
+
+For example, a repeated run can reuse previously cached enrichment results instead of requesting the same compounds again.
+
+Runtime cache files are stored under:
 
 ```text
-Raw activity records:          25
-Normalized activity records:   23
-Rejected activity records:      2
-
-Unique compounds:              13
-PubChem compounds enriched:    13
-Enrichment failures:            0
-
-Assays cataloged:               6
-Activities loaded:             23
-
-Repeated measurement groups:    0
-Exact duplicate groups:         0
-Conflicting measurement groups: 0
+data/cache/
 ```
 
-Both rejected records were Ki measurements with missing activity values.
+and are excluded from version control.
+
+## Reusing Raw ChEMBL Data
+
+A previously downloaded ChEMBL activity dataset can be reused with:
+
+```bash
+drug-catalog run \
+  --target CHEMBL203 \
+  --reuse-raw
+```
+
+This allows normalization, enrichment, quality analysis, and database loading to be repeated without downloading the full ChEMBL dataset again.
+
+For development and testing, a smaller sample can still be processed using:
+
+```bash
+drug-catalog run \
+  --target CHEMBL203 \
+  --max-records 25
+```
 
 ## Data Provenance
 
@@ -171,16 +225,17 @@ Example:
 
 ```json
 {
-  "run_id": "chembl-20260925T215916Z",
+  "run_id": "chembl-20260927T005514Z",
   "source": {
     "source_name": "ChEMBL",
+    "source_version": "ChEMBL_37",
     "endpoint": "https://www.ebi.ac.uk/chembl/api/data/activity.json",
     "query_parameters": {
       "target_chembl_id": "CHEMBL203"
     }
   },
   "raw_file": {
-    "record_count": 25,
+    "record_count": 58847,
     "sha256": "..."
   },
   "pipeline_version": "0.1.0"
@@ -201,44 +256,56 @@ Current rejection categories include:
 - unsupported units
 - missing or invalid activity value
 
-The pipeline also detects repeated measurements and conflicting activity values for the same compound, target, assay, activity type, and units.
-
-A consolidated report is generated at:
+A consolidated quality report is generated at:
 
 ```text
 data/curated/CHEMBL203_quality_report.json
 ```
 
-Example:
+The quality report summarizes:
 
-```json
-{
-  "raw_activity_records": 25,
-  "normalized_activity_records": 23,
-  "rejected_activity_records": 2,
-  "rejection_reasons": {
-    "missing_or_invalid_value": 2
-  },
-  "unique_compounds": 13,
-  "enriched_compounds": 13,
-  "enrichment_failures": 0,
-  "repeated_measurement_groups": 0,
-  "exact_duplicate_groups": 0,
-  "conflicting_measurement_groups": 0
-}
-```
+- raw record counts
+- normalized record counts
+- rejected records
+- rejection reasons
+- unique compounds
+- successful enrichments
+- enrichment failures
+- repeated measurements
+- exact duplicates
+- conflicting measurements
+
+## Repeated Measurements vs. Conflicts
+
+A compound may legitimately have multiple activity measurements against the same target.
+
+Measurements are not considered conflicting simply because their numeric values differ.
+
+The catalog treats measurements as directly comparable only when they share the same:
+
+- compound
+- target
+- assay
+- activity type
+- units
+
+Measurements from different assays represent different experimental contexts and are therefore retained independently.
+
+Conflict detection is restricted to measurements that share the same compound, target, assay, activity type, and units but report inconsistent values.
+
+This distinction avoids incorrectly treating legitimate experimental replication or assay variation as a data-quality error.
 
 ## PostgreSQL Catalog
 
-The relational catalog contains:
+The relational catalog contains the following core entities.
 
 ### `sources`
 
-Scientific source systems such as ChEMBL and PubChem.
+Scientific source systems such as ChEMBL and PubChem, including source version and endpoint metadata.
 
 ### `ingestion_runs`
 
-Tracks individual source retrievals, query metadata, raw-file checksums, record counts, and pipeline versions.
+Tracks individual source retrievals, query metadata, raw-file checksums, record counts, timestamps, and pipeline versions.
 
 ### `compounds`
 
@@ -254,7 +321,7 @@ ChEMBL assay identifiers associated with targets.
 
 ### `activities`
 
-Normalized compound-target bioactivity measurements linked to compounds, targets, assays, and source ingestion runs.
+Normalized compound-target bioactivity measurements linked to compounds, targets, assays, and ingestion runs.
 
 ## Setup
 
@@ -272,7 +339,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install:
+Install the package and development dependencies:
 
 ```bash
 pip install -e ".[dev]"
@@ -286,7 +353,22 @@ docker compose up -d
 
 ## Run the Pipeline
 
-Run the complete pipeline for EGFR:
+Run the complete EGFR dataset:
+
+```bash
+drug-catalog run \
+  --target CHEMBL203
+```
+
+Reuse previously downloaded ChEMBL data:
+
+```bash
+drug-catalog run \
+  --target CHEMBL203 \
+  --reuse-raw
+```
+
+Run a small development sample:
 
 ```bash
 drug-catalog run \
@@ -294,16 +376,20 @@ drug-catalog run \
   --max-records 25
 ```
 
-The command:
+The pipeline:
 
-1. retrieves ChEMBL activity data
-2. preserves raw records and provenance
-3. normalizes activity measurements
-4. enriches compounds through PubChem
-5. performs data-quality checks
-6. generates the quality report
-7. initializes PostgreSQL
-8. loads the curated catalog
+1. identifies the active ChEMBL release
+2. retrieves or reuses ChEMBL activity data
+3. preserves raw records and provenance
+4. normalizes bioactivity measurements
+5. records rejected data and rejection reasons
+6. resolves unique ChEMBL compounds
+7. enriches compounds through PubChem in batches
+8. checkpoints enrichment results
+9. performs duplicate and conflict analysis
+10. generates a quality report
+11. initializes the PostgreSQL catalog
+12. loads compounds, targets, assays, activities, and provenance
 
 ## Testing
 
@@ -332,13 +418,17 @@ The test suite covers:
 
 ## Example SQL Queries
 
-Queries are available in:
+Example queries are available in:
 
 ```text
 sql/example_queries.sql
 ```
 
-Example — find the most potent measurements against EGFR:
+### Most Potent EGFR IC50 Measurements
+
+Activity values should only be ranked when the measurement type and units are comparable.
+
+For example, IC50 and Ki are different pharmacological measurements and should not be mixed into a single numeric ranking merely because both are reported in nM.
 
 ```sql
 SELECT
@@ -347,30 +437,32 @@ SELECT
     c.molecular_formula,
     a.activity_type,
     a.activity_value,
-    a.activity_units
-FROM activities a
-JOIN compounds c
+    a.activity_units,
+    ass.assay_chembl_id
+FROM activities AS a
+JOIN compounds AS c
     ON c.compound_id = a.compound_id
-JOIN targets t
+JOIN targets AS t
     ON t.target_id = a.target_id
+LEFT JOIN assays AS ass
+    ON ass.assay_id = a.assay_id
 WHERE t.target_chembl_id = 'CHEMBL203'
+  AND a.activity_type = 'IC50'
+  AND a.activity_units = 'nM'
 ORDER BY a.activity_value ASC
-LIMIT 10;
+LIMIT 20;
 ```
 
-Example results from the current sample include:
+Other included examples show:
 
-```text
-CHEMBL69960    IC50       40 nM
-CHEMBL68920    IC50       41 nM
-CHEMBL76589    IC50      125 nM
-CHEMBL69960    IC50      170 nM
-CHEMBL68920    IC50      300 nM
-```
+- activity counts by measurement type
+- compounds measured across multiple assays
+- source and ingestion provenance
+- lineage from activity rows back to source ingestion runs
 
 ## Reproducibility
 
-The catalog is designed so that pipeline executions can be traced back to:
+The catalog is designed so that pipeline executions can be traced through:
 
 ```text
 source
@@ -378,16 +470,20 @@ source
       -> raw file
           -> checksum
               -> normalized records
-                  -> PostgreSQL catalog
+                  -> compound enrichment
+                      -> PostgreSQL catalog
 ```
 
-Load operations are idempotent, allowing the same dataset to be processed multiple times without duplicating catalog entities.
+Load operations are designed to be idempotent so the same dataset can be processed repeatedly without duplicating core catalog entities.
+
+External enrichment results are checkpointed so completed work can be reused after interrupted runs.
 
 ## Project Structure
 
 ```text
 drug-discovery-data-catalog/
 ├── data/
+│   ├── cache/
 │   ├── raw/
 │   └── curated/
 ├── sql/
@@ -398,6 +494,7 @@ drug-discovery-data-catalog/
 │       │   ├── chembl.py
 │       │   └── pubchem.py
 │       ├── batch_enrichment.py
+│       ├── cache.py
 │       ├── cli.py
 │       ├── compound_storage.py
 │       ├── conflicts.py
