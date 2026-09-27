@@ -10,5 +10,6 @@ data/raw/*
 data/curated/*
 !data/raw/.gitkeep
 !data/curated/.gitkeep
+data/cache/
 
 .DS_Store

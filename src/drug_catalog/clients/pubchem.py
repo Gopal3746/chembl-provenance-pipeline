@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+from drug_catalog.cache import JsonRecordCache
 
 PUBCHEM_BASE_URL = (
     "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
@@ -157,7 +160,12 @@ class PubChemClient:
         inchikeys: list[str],
         *,
         batch_size: int = DEFAULT_PUBCHEM_BATCH_SIZE,
+        cache_path: str | Path = (
+            "data/cache/pubchem_compounds.json"
+        ),
     ) -> dict[str, dict[str, Any]]:
+        cache = JsonRecordCache(cache_path)
+
         compounds_by_key: dict[
             str,
             dict[str, Any],
@@ -166,12 +174,32 @@ class PubChemClient:
         if not inchikeys:
             return compounds_by_key
 
+        cached_count = 0
+        missing_inchikeys: list[str] = []
+
+        for inchikey in inchikeys:
+            cached = cache.get(inchikey)
+
+            if cached is not None:
+                compounds_by_key[inchikey] = cached
+                cached_count += 1
+            else:
+                missing_inchikeys.append(inchikey)
+
+        print(
+            f"PubChem cache: {cached_count} hits, "
+            f"{len(missing_inchikeys)} remaining."
+        )
+
+        if not missing_inchikeys:
+            return compounds_by_key
+
         properties = ",".join(
             PUBCHEM_PROPERTIES
         )
 
         total_batches = (
-            len(inchikeys)
+            len(missing_inchikeys)
             + batch_size
             - 1
         ) // batch_size
@@ -182,12 +210,12 @@ class PubChemClient:
             for batch_number, start in enumerate(
                 range(
                     0,
-                    len(inchikeys),
+                    len(missing_inchikeys),
                     batch_size,
                 ),
                 start=1,
             ):
-                batch = inchikeys[
+                batch = missing_inchikeys[
                     start : start + batch_size
                 ]
 
@@ -211,6 +239,31 @@ class PubChemClient:
                 )
 
                 if response.status_code == 404:
+                    print(
+                        "Batch lookup returned 404; "
+                        "checking compounds individually..."
+                    )
+
+                    for inchikey in batch:
+                        compound = (
+                            self.fetch_compound_by_inchikey(
+                                inchikey
+                            )
+                        )
+
+                        if compound is None:
+                            continue
+
+                        compounds_by_key[
+                            inchikey
+                        ] = compound
+
+                        cache.set(
+                            inchikey,
+                            compound,
+                        )
+
+                    cache.save()
                     continue
 
                 response.raise_for_status()
@@ -232,9 +285,20 @@ class PubChemClient:
                         "InChIKey"
                     )
 
-                    if inchikey:
-                        compounds_by_key[
-                            inchikey
-                        ] = compound
+                    if not inchikey:
+                        continue
+
+                    compounds_by_key[
+                        inchikey
+                    ] = compound
+
+                    cache.set(
+                        inchikey,
+                        compound,
+                    )
+
+                # Persist every successful batch so a
+                # later failure does not lose prior work.
+                cache.save()
 
         return compounds_by_key
