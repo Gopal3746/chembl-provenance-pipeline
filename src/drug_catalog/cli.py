@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
 
 from drug_catalog.batch_enrichment import (
     enrich_compounds,
@@ -31,6 +33,7 @@ def run_pipeline(
     target_chembl_id: str,
     *,
     max_records: int | None = None,
+    reuse_raw: bool = False,
 ) -> None:
     initialize_database()
 
@@ -44,15 +47,40 @@ def run_pipeline(
         f"{chembl_version or 'unknown'}"
     )
 
-    print(
-        f"Fetching ChEMBL activities for "
-        f"{target_chembl_id}..."
+    raw_path = Path(
+        f"data/raw/chembl/{target_chembl_id}_activities.json"
     )
 
-    raw_activities = chembl_client.fetch_activities(
-        target_chembl_id=target_chembl_id,
-        max_records=max_records,
-    )
+    if reuse_raw:
+        if not raw_path.exists():
+            raise FileNotFoundError(
+                f"Raw activity file not found: {raw_path}"
+            )
+
+        print(
+            f"Reusing raw ChEMBL activities from "
+            f"{raw_path}..."
+        )
+
+        with raw_path.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+            raw_activities = json.load(file)
+
+        if max_records is not None:
+            raw_activities = raw_activities[:max_records]
+
+    else:
+        print(
+            f"Fetching ChEMBL activities for "
+            f"{target_chembl_id}..."
+        )
+
+        raw_activities = chembl_client.fetch_activities(
+            target_chembl_id=target_chembl_id,
+            max_records=max_records,
+        )
 
     chembl_run = save_raw_records(
         raw_activities,
@@ -257,6 +285,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    run_parser.add_argument(
+        "--reuse-raw",
+        action="store_true",
+        help=(
+            "Reuse an existing raw ChEMBL activity file "
+            "instead of downloading it again."
+        ),
+    )
+
     return parser
 
 
@@ -268,6 +305,7 @@ def main() -> None:
         run_pipeline(
             args.target,
             max_records=args.max_records,
+            reuse_raw=args.reuse_raw,
         )
 
 
