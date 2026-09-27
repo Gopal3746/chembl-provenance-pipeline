@@ -1,0 +1,2 @@
+[console_scripts]
+drug-catalog = drug_catalog.cli:main

@@ -31,3 +31,6 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+
+[project.scripts]
+drug-catalog = "drug_catalog.cli:main"
