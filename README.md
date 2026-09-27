@@ -152,16 +152,38 @@ The pipeline was validated end-to-end against the complete ChEMBL activity datas
 | Normalized activity records | 28,643 |
 | Rejected activity records | 30,204 |
 | Unique compounds | 14,670 |
-| PubChem-enriched compounds | 14,383 |
-| Enrichment failures | 287 |
+| PubChem-enriched compounds | 14,400 |
+| Enrichment failures | 270 |
 | Assays cataloged | 2,690 |
-| Activity rows loaded | 28,148 |
+| Activity rows loaded | 28,185 |
+| Repeated measurement groups | 601 |
+| Exact duplicate groups | 195 |
+| Conflicting measurement groups | 406 |
 
 The full-scale run processed PubChem enrichment in hundreds of batches rather than issuing one API request per compound.
 
 Persistent checkpointing allows completed PubChem lookups to be reused if a later request fails or the pipeline is interrupted.
 
 Raw ChEMBL data can also be reused locally so downstream processing does not require downloading the complete activity dataset again.
+
+### Rejection Breakdown
+
+Of 58,847 raw ChEMBL activity records, 30,204 were excluded during normalization:
+
+| Rejection reason | Records |
+| --- | ---: |
+| Unsupported activity type | 27,757 |
+| Unsupported units | 2,292 |
+| Missing or invalid activity value | 155 |
+| **Total rejected** | **30,204** |
+
+Most exclusions were caused by the intentionally constrained normalization scope rather than malformed source records. The current pipeline accepts selected activity types such as IC50, Ki, Kd, and EC50 and normalizes measurements reported in nM.
+
+### Activity Load Gap
+
+Of the 28,643 normalized activity records, 28,185 were loaded into PostgreSQL.
+
+The remaining 458 records belonged to compounds that could not be successfully resolved into the compound catalog during enrichment, so they were skipped during activity loading to preserve referential integrity.
 
 ## Resilient Enrichment
 
@@ -177,8 +199,6 @@ The PubChem enrichment layer therefore includes:
 - persistent local checkpoints
 - reuse of successfully enriched compounds
 
-For example, a repeated run can reuse previously cached enrichment results instead of requesting the same compounds again.
-
 Runtime cache files are stored under:
 
 ```text
@@ -186,6 +206,32 @@ data/cache/
 ```
 
 and are excluded from version control.
+
+### Enrichment Failures
+
+Of 14,670 unique compounds, 14,400 were successfully enriched and 270 could not be resolved into the compound catalog.
+
+| Failure reason | Compounds |
+| --- | ---: |
+| Missing ChEMBL InChIKey | 20 |
+| Not resolved in PubChem | 250 |
+| **Total** | **270** |
+
+Activities associated with unresolved compounds are not loaded into the `activities` table because activity rows require a valid compound foreign key. This preserves referential integrity between the compound and activity catalog.
+
+Some compounds that failed during an earlier enrichment attempt were successfully resolved on a later retry, demonstrating the benefit of retryable, checkpointed external API enrichment.
+
+### Runtime and Resume Performance
+
+A resumed full EGFR run using the existing ChEMBL raw dataset and persistent PubChem cache completed in approximately:
+
+```text
+4 minutes 15 seconds
+```
+
+The resumed run reused 14,400 cached PubChem compound records and retried only the remaining unresolved identifiers.
+
+This substantially reduces repeated network work compared with re-downloading the complete ChEMBL dataset and re-enriching every compound from scratch.
 
 ## Reusing Raw ChEMBL Data
 
@@ -238,7 +284,7 @@ Example:
     "record_count": 58847,
     "sha256": "..."
   },
-  "pipeline_version": "0.1.0"
+  "pipeline_version": "0.2.0"
 }
 ```
 
