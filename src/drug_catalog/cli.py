@@ -37,7 +37,17 @@ def run_pipeline(
     chembl_client = ChEMBLClient()
     pubchem_client = PubChemClient()
 
-    print(f"Fetching ChEMBL activities for {target_chembl_id}...")
+    chembl_version = chembl_client.fetch_database_version()
+
+    print(
+        f"Using ChEMBL release: "
+        f"{chembl_version or 'unknown'}"
+    )
+
+    print(
+        f"Fetching ChEMBL activities for "
+        f"{target_chembl_id}..."
+    )
 
     raw_activities = chembl_client.fetch_activities(
         target_chembl_id=target_chembl_id,
@@ -47,9 +57,10 @@ def run_pipeline(
     chembl_run = save_raw_records(
         raw_activities,
         source_name="ChEMBL",
-        source_version=None,
+        source_version=chembl_version,
         endpoint=(
-            "https://www.ebi.ac.uk/chembl/api/data/activity.json"
+            "https://www.ebi.ac.uk/chembl/api/data/"
+            "activity.json"
         ),
         query_parameters={
             "target_chembl_id": target_chembl_id,
@@ -104,7 +115,7 @@ def run_pipeline(
     )
 
     quality_report_path = (
-        f"data/curated/"
+        "data/curated/"
         f"{target_chembl_id}_quality_report.json"
     )
 
@@ -166,9 +177,26 @@ def run_pipeline(
 
     print()
     print("Pipeline complete.")
-    print(f"Raw activities: {len(raw_activities)}")
-    print(f"Normalized activities: {len(normalized)}")
-    print(f"Rejected activities: {len(rejected)}")
+    print(
+        f"ChEMBL release: "
+        f"{chembl_version or 'unknown'}"
+    )
+    print(
+        f"Raw activities: "
+        f"{len(raw_activities)}"
+    )
+    print(
+        f"Normalized activities: "
+        f"{len(normalized)}"
+    )
+    print(
+        f"Rejected activities: "
+        f"{len(rejected)}"
+    )
+    print(
+        f"Unique compounds: "
+        f"{len(unique_compound_ids)}"
+    )
     print(
         f"Enriched compounds: "
         f"{len(enrichment_result.compounds)}"
@@ -177,9 +205,18 @@ def run_pipeline(
         f"Enrichment failures: "
         f"{len(enrichment_result.failures)}"
     )
-    print(f"Assays loaded: {len(assay_ids)}")
-    print(f"Activities loaded: {loaded_activities}")
-    print(f"Quality report: {quality_report_path}")
+    print(
+        f"Assays loaded: "
+        f"{len(assay_ids)}"
+    )
+    print(
+        f"Activities loaded: "
+        f"{loaded_activities}"
+    )
+    print(
+        f"Quality report: "
+        f"{quality_report_path}"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -204,14 +241,20 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--target",
         required=True,
-        help="ChEMBL target ID, for example CHEMBL203.",
+        help=(
+            "ChEMBL target ID, "
+            "for example CHEMBL203."
+        ),
     )
 
     run_parser.add_argument(
         "--max-records",
         type=int,
         default=None,
-        help="Optional maximum number of activity records.",
+        help=(
+            "Optional maximum number "
+            "of activity records."
+        ),
     )
 
     return parser

@@ -39,24 +39,33 @@ def test_get_unique_compound_ids() -> None:
 
 def test_enrich_compounds() -> None:
     class FakeChEMBLClient:
-        def fetch_molecule(self, molecule_chembl_id):
+        def fetch_molecules(self, molecule_chembl_ids):
             return {
-                "molecule_structures": {
-                    "standard_inchi_key": f"{molecule_chembl_id}-KEY"
+                molecule_id: {
+                    "molecule_chembl_id": molecule_id,
+                    "molecule_structures": {
+                        "standard_inchi_key": (
+                            f"{molecule_id}-KEY"
+                        )
+                    },
                 }
+                for molecule_id in molecule_chembl_ids
             }
 
     class FakePubChemClient:
-        def fetch_compound_by_inchikey(self, inchikey):
+        def fetch_compounds_by_inchikeys(self, inchikeys):
             return {
-                "CID": 123,
-                "MolecularFormula": "C10H10",
-                "MolecularWeight": "130.19",
-                "SMILES": "CC",
-                "ConnectivitySMILES": "CC",
-                "InChI": "InChI=1S/example",
-                "InChIKey": inchikey,
-                "IUPACName": "example",
+                inchikey: {
+                    "CID": 123,
+                    "MolecularFormula": "C10H10",
+                    "MolecularWeight": "130.19",
+                    "SMILES": "CC",
+                    "ConnectivitySMILES": "CC",
+                    "InChI": "InChI=1S/example",
+                    "InChIKey": inchikey,
+                    "IUPACName": "example",
+                }
+                for inchikey in inchikeys
             }
 
     activities = [
@@ -78,16 +87,23 @@ def test_enrich_compounds() -> None:
     assert compound.molecule_chembl_id == "CHEMBL1"
     assert compound.pubchem_cid == 123
 
+
 def test_enrich_compounds_tracks_missing_inchikey() -> None:
     class FakeChEMBLClient:
-        def fetch_molecule(self, molecule_chembl_id):
+        def fetch_molecules(self, molecule_chembl_ids):
             return {
-                "molecule_structures": None,
+                molecule_id: {
+                    "molecule_chembl_id": molecule_id,
+                    "molecule_structures": None,
+                }
+                for molecule_id in molecule_chembl_ids
             }
 
     class FakePubChemClient:
-        def fetch_compound_by_inchikey(self, inchikey):
-            raise AssertionError("PubChem should not be called")
+        def fetch_compounds_by_inchikeys(self, inchikeys):
+            raise AssertionError(
+                "PubChem should not be called"
+            )
 
     activities = [
         make_activity("CHEMBL1"),
